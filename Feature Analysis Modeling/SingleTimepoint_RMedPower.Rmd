@@ -1,0 +1,304 @@
+---
+title: "SingleTimepoint_RMedPower_Combine"
+author: "Stephanie Lam"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r library_setup, include=FALSE}
+options(warn=-1)
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+
+#libraries required, if not installed, remove # symbol on next line and run the line to install
+#install.packages(c("lmerTest", "ggplot2", "plyr", "EnvStats", "DescTools", "gridExtra", "readxl","openxlsx","tidyr", "magrittr","xtable","dplyr))
+
+library(lmerTest)
+require(ggplot2)
+library(plyr)
+library(EnvStats)
+#library(DescTools)
+library(gridExtra)
+library(readxl)
+library(openxlsx)
+library(tidyr)
+library(magrittr)
+library(xtable)
+library(dplyr)
+library(reshape2)
+```
+
+```{r}
+data_path <- "/Users/stephanielam/Dropbox (Gladstone)/calcPower f1000_manuscript/Cortical RMedPower Data/Data/"
+output_path <- "/Users/stephanielam/Dropbox (Gladstone)/Stephanie/NucleiML_HDCortical/CorticalMorphology/2024/RUES2/Single Timepoint/Mar2024/T8/20CAG72CAG"
+experiments <- c("COR16","COR21SYNEGFP", "COR24PLATE2","COR25PLATE2",
+                 "COR27","COR29-plate1-20201207",
+                 "COR45-plate2","COR46-p1-SYNeGFP","COR48-p1-SYNeGFP","COR50-p1-SYNeGFP")
+drop_features <- c("brightness","bright.pixel","brightnessK","brightnessI", "skel_length", "skel_branches","corners","scharr","fft.power", "noise","sholl_total")
+order <- c("20CAG30","20CAG65","72CAG2","72CAG9","72CAG12","KO8A")
+categorical_fetaures <- c("edge", "sholl_med","sholl_total")
+```
+source directory: `r data_path`  \
+
+```{r dataframe_organize}
+csvs = list.files(data_path, pattern="*.csv", recursive = TRUE, full.names = TRUE)
+
+#remove any platelayout csv from list
+csvs = csvs[! grepl("platelayout.csv", csvs) ]
+csvs = csvs[! grepl("ignore", csvs) ]
+
+#keep only wanted experiments
+csvs = csvs[ grepl(paste(experiments, collapse = "|"), csvs) ]
+
+#combine experiments csv
+myfiles = lapply(csvs, read.csv)
+input_data = do.call(bind_rows, myfiles)
+
+#drop feature/cell lines
+input_data <- input_data[ , !(names(input_data) %in% drop_features)]
+
+input_data$classif[grepl("KO", input_data$cellline, ignore.case=FALSE)] <- "2"
+input_data$classif[grepl("72CAG", input_data$cellline, ignore.case=FALSE)] <- "1"
+input_data$classif[grepl("20CAG", input_data$cellline, ignore.case=FALSE)] <- "0"
+
+#Remove KO class
+input_data <- input_data[input_data$classif != "2",]
+input_data$classif<- as.factor(input_data$classif)
+
+
+names(input_data)[names(input_data) == 'exp'] <- 'experiment'
+
+#take care of cell lines
+input_data$experiment = as.factor(input_data$experiment)
+names(input_data)[names(input_data) == 'cellline'] <- 'line'
+input_data$line=as.factor(input_data$line)
+input_data$line = gsub("Untreated-|Untreated_","",input_data$line)
+input_data$line = gsub("COD9-","",input_data$line)
+input_data$line = as.factor(input_data$line)
+
+#take care of timepoints, extract timepoint string from ident
+input_data$timepoint <- unlist(lapply(1:length(input_data$ident),
+                                      function(x) strsplit(as.character(input_data$ident[x]),"_")[[1]][3]))
+input_data$timepoint  = as.factor(input_data$timepoint)
+input_data$timepoint  = gsub('[Tt]','',input_data$timepoint)
+input_data$timepoint = as.factor(as.numeric(as.character(input_data$timepoint)))
+
+#replace timepoint values......
+input_data$new_timepoint = input_data$timepoint
+input_data$new_timepoint[input_data$new_timepoint == 0] <- 1
+input_data$new_timepoint[input_data$new_timepoint == 2] <- 1
+input_data$new_timepoint[input_data$new_timepoint != 1] <- 8
+
+#single timepoint analysis
+input_data <- input_data[input_data$new_timepoint != 1,]
+
+input_data <- subset(input_data, select = -c(timepoint))
+names(input_data)[names(input_data) == "new_timepoint"] <- "timepoint"
+input_data$timepoint  = factor(input_data$timepoint)
+
+Data<-input_data
+Data <- Data %>% dplyr::select(c("ident", "classif", "line", "experiment","timepoint"), everything())
+#Data <- Data %>% dplyr::select(-c("Sci_WellID","Sci_SampleID"))
+Data$line <- factor(Data$line, levels = order)
+
+
+##CHECK ACCORDING TO THE DATA: Column indices in the Data data.frame with information regarding experiment, condition
+VariablesOfInterestIndices <- 1:which(colnames(Data)=="timepoint")
+cat("VariablesOfInterestIndices \n")
+print(names(Data)[1:which(colnames(Data)=="timepoint")])
+cat("\n")
+
+####CHECK ACCORDING TO THE DATA: Column indices in the Data data.frame with information regarding responses of interest
+cat("ResponsesOfInterestIndices \n")
+ResponsesOfInterestIndices <- (which(colnames(Data)=="timepoint")+1):ncol(Data)
+print(names(Data)[(which(colnames(Data)=="timepoint")+1):ncol(Data)])
+cat("\n")
+
+
+#Print basic information
+cat("Features dropped \n\n")
+print(drop_features)
+
+sum_original = Data %>% group_by(experiment, timepoint) %>% summarise(n=n())
+sum_original_line = Data %>% group_by(experiment, timepoint, line) %>% summarise(n=n())
+write.csv(Data, file.path(output_path,"original_data.csv"))
+write.csv(sum_original,  file.path(output_path,"original_data_points.csv"))
+write.csv(sum_original_line,  file.path(output_path,"original_data_points_line.csv"))
+
+
+```
+
+
+```{r RMedPower_transform_data}
+#install.packages("devtools")
+source("~/Dropbox (Gladstone)/calcPower f1000_manuscript/scripts/beta_test/transform_data.R")
+source("~/Dropbox (Gladstone)/calcPower f1000_manuscript/scripts/visualize_two_variable_associations.R")
+
+library(devtools)
+install_github('gladstone-institutes/RMeDPower', build_vignettes=TRUE)
+library(RMeDPower)
+
+transformed_col <- NULL
+transformed_df <- Data[c(1:which(colnames(Data)=="timepoint"))]
+
+#add features after transformation (with outliers/logTransformed, removed outliers/noOutliers, or no transformatio)
+
+for(i in ResponsesOfInterestIndices){
+  feature = names(Data)[i]
+  cat(paste0("transformaing data for feature: ",feature," \n"))
+  
+  transformed_col= RMeDPower::transform_data(data=Data, condition_column="classif",
+                                 experimental_columns=c("experiment","line"), response_column=feature,
+                                 condition_is_categorical=TRUE,
+                                 repeatable_columns = "line",
+                                 response_is_categorical=FALSE, alpha=0.05)
+  
+  if(feature %in% categorical_fetaures){
+    if (any(grepl(paste0(feature,"_noOutlier"),colnames(transformed_col)))){
+      col_index = which(grepl(paste0(feature,"_noOutlier"),colnames(transformed_col)))
+    }
+  }else{
+    if (any(grepl("_logTransformed_noOutlier",colnames(transformed_col)))){
+      col_index = which(grepl("_logTransformed_noOutlier",colnames(transformed_col)))
+    }else if (any(grepl("_logTransformed$",colnames(transformed_col)))){
+      col_index = which(grepl("_logTransformed$",colnames(transformed_col)))
+    }else{
+      cat("No transformation done")
+      col_index = which(grepl(feature,colnames(transformed_col)))
+    }
+    
+  }
+  
+  #rename feature and store in new transformed dataframe
+  transformed_merge = data.frame("ident" = transformed_col[,c("ident")],
+                                 transformed_col[,col_index])
+  transformed_df <- merge(transformed_df, transformed_merge)
+  #transformed_df<- cbind(transformed_df, transformed_col[,col_index])
+  colnames(transformed_df)[ncol(transformed_df)] <- feature
+}
+
+write.csv(transformed_df,file.path(output_path,"transformed_df.csv"))
+sum_transformed = transformed_df %>% group_by(experiment, timepoint) %>% summarise(n=n())
+sum_transformed_line = transformed_df %>% group_by(experiment, timepoint, line) %>% summarise(n=n())
+write.csv(sum_transformed,  file.path(output_path,"transformed_data_points.csv"))
+write.csv(sum_transformed_line,  file.path(output_path,"transformed_data_points_line.csv"))
+
+```
+
+
+```{r RMedPower_Lmer, echo=FALSE, warning=FALSE}
+results_transformed_estimate=NULL
+results_transformed_pvalue=NULL
+
+transformed_df_copy = transformed_df
+notNAindex=which( rowSums(is.na(transformed_df)) == 0 )
+NAindex=which( rowSums(is.na(transformed_df)) != 0 )
+na_df = transformed_df[NAindex,]
+dropped_df=transformed_df[notNAindex,]
+final_resi_box=dropped_df[,1:which(colnames(Data)=="timepoint")]
+
+
+for(i in ResponsesOfInterestIndices){
+  feature = names(transformed_df)[i]
+  cat(paste0("Lmer estimate for feature: ",feature," \n"))
+  if (feature %in% categorical_fetaures){
+    print("skipping catergorial feature")
+    lmer_summary = calculate_lmer_estimates(data=transformed_df, 
+                                            condition_column="classif", 
+                                            experimental_columns=c("experiment","line"),
+                                            response_column=feature,
+                                            condition_is_categorical=TRUE,
+                                            repeatable_columns="line",
+                                            response_is_categorical=TRUE,
+                                           family="poisson")
+
+  res = get_residuals(data = transformed_df, condition_column = "classif",
+                             experimental_columns = c("experiment", "line"), 
+                             response_column = feature,
+                      condition_is_categorical = TRUE, 
+                      repeatable_columns = "line", 
+                      response_is_categorical=TRUE, family="poisson")
+  
+  write.csv(res$residual, paste0(feature,"_data_residuals.csv"))
+
+  results_transformed_estimate=cbind(results_transformed_estimate,lmer_summary$coefficients[,1][2])
+  results_transformed_pvalue=cbind(results_transformed_pvalue,lmer_summary$coefficients[,4][2])
+  }else{
+     lmer_summary = calculate_lmer_estimates(data=transformed_df, 
+                                            condition_column="classif", 
+                                            experimental_columns=c("experiment", "line"),
+                                            response_column=feature,
+                                            condition_is_categorical=TRUE,
+                                            repeatable_columns="line",
+                                            response_is_categorical=FALSE,
+                                            family=NULL)
+     
+    cat(paste0("Residuals for feature: ",feature," \n"))
+     res = get_residuals(data = transformed_df, condition_column = "classif",
+                             experimental_columns = c("experiment", "line"), 
+                             response_column = feature,
+                      condition_is_categorical = TRUE, 
+                      repeatable_columns = "line", 
+                      response_is_categorical=FALSE, family=NULL)
+     
+     write.csv(res$residual, paste0(feature,"_data_residuals.csv"))
+     
+  
+     
+  results_transformed_estimate=cbind(results_transformed_estimate,lmer_summary$coefficients[,1][2])
+  results_transformed_pvalue=cbind(results_transformed_pvalue,lmer_summary$coefficients[,5][2])
+  }
+  
+  final_resi_box <- cbind(final_resi_box, res$residual)
+  colnames(final_resi_box)[which(names(final_resi_box) == "resi_box$residual")] <- feature
+
+}
+
+colnames(results_transformed_estimate)=colnames(transformed_df)[ResponsesOfInterestIndices]
+colnames(results_transformed_pvalue)=colnames(transformed_df)[ResponsesOfInterestIndices]
+write.csv(results_transformed_estimate,"results_transformed_estimate.csv")
+write.csv(results_transformed_pvalue,"results_transformed_pvalue.csv")
+
+
+```
+
+
+```{r heatmap}
+#heatmap for estimate and pvalues
+estimate_heatmap <- as.data.frame(results_transformed_estimate)
+estimate_heatmap['row'] <- rownames(estimate_heatmap)
+pvalue <- as.data.frame(results_transformed_pvalue)
+pvalue['row'] <- rownames(pvalue)
+
+df.molten_est <- melt(estimate_heatmap, id.vars="row")
+names(df.molten_est)[names(df.molten_est)=="value"] <- "estimate"
+df.pvalue <- melt(pvalue, id.vars="row")
+names(df.pvalue)[names(df.pvalue)=="value"] <- "pvalue"
+
+
+heatmap_df <- merge(df.molten_est,df.pvalue)
+# Create column of significance labels
+heatmap_df$stars <- cut(heatmap_df$pvalue, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))  
+
+write.csv(heatmap_df,"results_all.csv")
+
+
+print(ggplot(heatmap_df, aes(variable, row, fill= estimate)) +
+        geom_tile() +
+        scale_fill_gradient2()+ theme(axis.text.x = element_text(angle = 90))+
+        ggtitle("estimate"))
+
+
+print(ggplot(heatmap_df, aes(variable, row, fill= estimate)) + 
+  geom_tile() +
+  scale_fill_gradient2()+ theme(axis.text.x = element_text(angle = 90))+
+  ggtitle("estimate")+
+  geom_text(aes(label = stars),size=3))
+
+pdf("Residuals_HEATMAP.pdf")
+print(ggplot(heatmap_df, aes(variable, row, fill= estimate)) +
+        geom_tile() +
+        scale_fill_gradient2()+ theme(axis.text.x = element_text(angle = 90))+
+        ggtitle("estimate"))
+dev.off()
+```
